@@ -995,7 +995,7 @@ class _ChatPageState extends State<ChatPage> {
     // return systemPrompt;
   }
 
-  Future<String> _getLasstUserMessagePrompt(String userMessage) async {
+  Future<String> _injectSystemPrompt(String userMessage) async {
     final promptGenerator = SystemPromptGenerator();
 
     var tools = <Map<String, dynamic>>[];
@@ -1005,13 +1005,9 @@ class _ChatPageState extends State<ChatPage> {
       }
     }
 
-    if (tools.isEmpty) {
-      return userMessage;
-    }
-
     final toolPrompt = promptGenerator.generateToolPrompt(tools);
 
-    return "<user_message>\n$userMessage\n</user_message>\n\n<tool_prompt>\n$toolPrompt\n</tool_prompt>";
+    return "<system_prompt>\n$toolPrompt</system_prompt>\n\n<user_message>\n$userMessage\n</user_message>\n>";
   }
 
   Future<void> _processLLMResponse() async {
@@ -1066,20 +1062,17 @@ class _ChatPageState extends State<ChatPage> {
 
     final modelSetting = ProviderManager.settingsProvider.modelSetting;
 
-    final lastUserMessageIndex = messageList.lastIndexWhere(
+    final firstUserMessageIndex = messageList.indexWhere(
       (m) => m.role == MessageRole.user,
     );
 
     final systemPrompt = await _getSystemPrompt();
 
-    if (ProviderManager.serverStateProvider.enabledCount > 0 &&
-        lastUserMessageIndex >= 0) {
-      messageList[lastUserMessageIndex] =
-          messageList[lastUserMessageIndex].copyWith(
-        content: await _getLasstUserMessagePrompt(
-            messageList[lastUserMessageIndex].content ?? ''),
-      );
-    }
+    messageList[firstUserMessageIndex] =
+        messageList[firstUserMessageIndex].copyWith(
+      content: await _injectSystemPrompt(
+          messageList[firstUserMessageIndex].content ?? ''),
+    );
 
     final stream = _llmClient!.chatStreamCompletion(CompletionRequest(
       model: ProviderManager.chatModelProvider.currentModel.name,

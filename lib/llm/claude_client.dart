@@ -89,9 +89,13 @@ class ClaudeClient extends BaseLLMClient {
   Stream<LLMResponse> chatStreamCompletion(CompletionRequest request) async* {
     final messages = chatMessageToClaudeMessage(request.messages);
 
+    final systemMessage = messages.first['content'];
+    messages.removeAt(0);
+
     final body = {
       'model': request.model,
-      'messages': messages,      
+      'messages': messages,
+      'system': systemMessage,
       'max_tokens': request.modelSetting?.maxTokens ?? 1024,
       'stream': true,
     };
@@ -373,7 +377,7 @@ List<Map<String, dynamic>> chatMessageToClaudeMessage(
     }
 
     final json = {
-      'role': message.role == MessageRole.user ? 'user' : 'assistant',
+      'role': message.role.value,
       'content': contentParts,
     };
 
