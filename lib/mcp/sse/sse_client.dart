@@ -94,6 +94,7 @@ class SSEClient implements McpClient {
               _processStateController.add(const ProcessState.running());
             } else {
               try {
+                if (data.startsWith('/messages/?session_id=')) return;
                 final jsonData = jsonDecode(data);
                 final message = JSONRPCMessage.fromJson(jsonData);
                 _handleMessage(message);
@@ -234,6 +235,7 @@ class SSEClient implements McpClient {
   @override
   Future<JSONRPCMessage> sendToolList() async {
     final message = JSONRPCMessage(id: 'tool-list-1', method: 'tools/list');
+    Logger.root.info('Tool list request: ${jsonEncode(message.toString())}');
     return sendMessage(message);
   }
 

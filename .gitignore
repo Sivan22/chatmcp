@@ -32,6 +32,9 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+/linux
+/windows
+/macos
 
 # Symbolication related
 app.*.symbols
@@ -61,3 +64,7 @@ dist/*
 
 # VSCode related
 .vscode/
+windows/flutter/generated_plugin_registrant.h
+linux/flutter/generated_plugin_registrant.cc
+windows/flutter/generated_plugins.cmake
+linux/flutter/generated_plugins.cmake

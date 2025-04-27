@@ -119,12 +119,17 @@ class _MessageListState extends State<MessageList> {
 
         for (var msg in widget.messages.reversed) {
           if (msg.role == MessageRole.user) {
+            // Add any existing assistant messages group before adding the user message
             if (currentGroup.isNotEmpty) {
               groupedMessages.add(currentGroup);
               currentGroup = [];
             }
-            currentGroup.add(msg);
-            groupedMessages.add(currentGroup);
+
+            // Create a new group just for this user message and add it
+            List<ChatMessage> userGroup = [msg];
+            groupedMessages.add(userGroup);
+
+            // Reset current group for next assistant messages
             currentGroup = [];
           } else {
             currentGroup.insert(0, msg);

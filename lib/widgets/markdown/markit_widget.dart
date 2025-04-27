@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
-// import 'markit.dart';
-
 import 'package:markdown_widget/markdown_widget.dart';
-import './widgets/latex.dart';
 import './widgets/link.dart';
 import './widgets/code.dart';
 import './widgets/details.dart';
@@ -98,7 +95,6 @@ class Markit extends StatelessWidget {
           linesMargin: const EdgeInsets.symmetric(vertical: 4),
           generators: [
             linkGenerator,
-            latexGenerator,
             codeBlockGenerator,
             artifactAntThinkingGenerator,
             artifactAntArtifactGenerator,
@@ -114,14 +110,12 @@ class Markit extends StatelessWidget {
             ArtifactAntArtifactInlineSyntax(),
             DetailsSyntax(),
             LinkSyntax(),
-            LatexSyntax(),
             ThinkInlineSyntax(),
             FunctionInlineSyntax(),
             FunctionResultInlineSyntax(),
           ],
           blockSyntaxList: [
             DetailsBlockSyntax(),
-            LatexBlockSyntax(),
             ThinkBlockSyntax(),
             ArtifactAntThinkingBlockSyntax(),
             ArtifactAntArtifactBlockSyntax(),

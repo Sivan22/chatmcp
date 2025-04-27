@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:chatmcp/llm/prompt.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:chatmcp/llm/model.dart';
 import 'package:chatmcp/llm/llm_factory.dart';
 import 'package:chatmcp/llm/base_llm_client.dart';
+import 'package:chatmcp/llm/function_calling.dart' as fc;
 import 'package:flutter/rendering.dart';
 import 'package:logging/logging.dart';
 import 'package:file_picker/file_picker.dart';
@@ -42,6 +44,7 @@ class _ChatPageState extends State<ChatPage> {
   String _parentMessageId = ''; // 父消息ID
   bool _isCancelled = false; // 是否取消
   bool _isWating = false; // 是否正在补全
+  bool _isFinalAnswerReceived = false; // 是否收到最终答案
 
   WidgetsToImageController toImagecontroller = WidgetsToImageController();
   // to save image bytes of widget
@@ -84,12 +87,84 @@ class _ChatPageState extends State<ChatPage> {
     _addListeners();
     _initializeHistoryMessages();
     on<RunFunctionEvent>(_onRunFunction);
+    on<fc.AskFollowupQuestionEvent>(_onAskFollowupQuestion);
+    on<fc.FinalAnswerEvent>(_onFinalAnswer);
   }
 
   RunFunctionEvent? _runFunctionEvent;
+  fc.AskFollowupQuestionEvent? _askFollowupQuestionEvent;
+  fc.FinalAnswerEvent? _finalAnswerEvent;
   bool _isRunningFunction = false;
   bool _userApproved = false;
   bool _userRejected = false;
+
+  Future<void> _onAskFollowupQuestion(fc.AskFollowupQuestionEvent event) async {
+    setState(() {
+      _askFollowupQuestionEvent = event;
+      _isLoading = false; // Stop loading state to allow user input
+      _isWating = false; // Stop waiting state
+      _isFinalAnswerReceived =
+          true; // Stop the flow, just like with final_answer
+    });
+
+    // Get the question and options from the event
+    final question = event.question;
+    final options = event.options;
+
+    // If the last message exists and is from the assistant, update it
+    if (_messages.isNotEmpty && _messages.last.role == MessageRole.assistant) {
+      // Get the original content that contains the function call
+      final originalContent = _messages.last.content ?? '';
+
+      // Generate a user-friendly display of the question and options
+      String displayText = '';
+
+      // Add the question
+      if (question.isNotEmpty) {
+        displayText = '\n\n**Question:** $question';
+      }
+
+      // Add options if available
+      if (options != null && options.isNotEmpty) {
+        displayText += '\n\n**Options:**';
+        for (int i = 0; i < options.length; i++) {
+          displayText += '\n- ${options[i]}';
+        }
+      }
+
+      // Format the content to preserve the function call and add the user-friendly version
+      String formattedContent = originalContent + displayText;
+
+      // Update the existing message with the formatted content
+      _messages.last = _messages.last.copyWith(
+        content: formattedContent,
+      );
+
+      // parentMessageId remains the same since we're modifying the existing message
+    }
+
+    // Wait for user response in the next handleSubmitted call
+  }
+
+  Future<void> _onFinalAnswer(fc.FinalAnswerEvent event) async {
+    setState(() {
+      _finalAnswerEvent = event;
+      _isFinalAnswerReceived = true;
+    });
+
+    final msgId = Uuid().v4();
+    final answer = event.answer;
+
+    // Add the final answer as an assistant message
+    _messages.add(ChatMessage(
+      messageId: msgId,
+      content: answer,
+      role: MessageRole.assistant,
+      parentMessageId: _parentMessageId,
+      isFinalAnswer: true,
+    ));
+    _parentMessageId = msgId;
+  }
 
   Future<void> _onRunFunction(RunFunctionEvent event) async {
     setState(() {
@@ -104,7 +179,7 @@ class _ChatPageState extends State<ChatPage> {
     // }
 
     if (!_isLoading) {
-      _handleSubmitted(SubmitData("", []));
+      _handleSubmitted(SubmitData("", []), addUserMessage: false);
     }
   }
 
@@ -291,13 +366,12 @@ class _ChatPageState extends State<ChatPage> {
 
     // print('messageId: ${lastMessage.messageId}');
 
-    ChatMessage? nextMessage = messages
-        .where((m) => m.role == MessageRole.user)
-        .firstWhere(
-          (m) => m.parentMessageId == lastMessage.messageId,
-          orElse: () =>
-              ChatMessage(messageId: '', content: '', role: MessageRole.user),
-        );
+    // Find all direct child messages (not just user messages)
+    ChatMessage? nextMessage = messages.firstWhere(
+      (m) => m.parentMessageId == lastMessage.messageId,
+      orElse: () =>
+          ChatMessage(messageId: '', content: '', role: MessageRole.user),
+    );
 
     // print(
     // 'nextMessage:\n${const JsonEncoder.withIndent('  ').convert(nextMessage)}');
@@ -348,6 +422,8 @@ class _ChatPageState extends State<ChatPage> {
         _isRunningFunction = false;
         _userApproved = false;
         _userRejected = false;
+        _isFinalAnswerReceived = false; // Reset the final answer flag
+        _toolResultMessageAdded = false; // Reset the tool result flag
       });
       return;
     }
@@ -374,6 +450,10 @@ class _ChatPageState extends State<ChatPage> {
         _isRunningFunction = false;
         _userApproved = false;
         _userRejected = false;
+        _isFinalAnswerReceived =
+            false; // Also reset final answer flag when switching chats
+        _toolResultMessageAdded =
+            false; // Reset the tool result flag when switching chats
       });
     }
   }
@@ -399,16 +479,6 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     final parentMsgIndex = _messages.length - 1;
-    for (var i = 0; i < parentMsgIndex; i++) {
-      if (_messages[i].content?.contains('<function') == true &&
-          _messages[i].content?.contains('<function done="true"') == false) {
-        _messages[i] = _messages[i].copyWith(
-          content: _messages[i]
-              .content
-              ?.replaceAll("<function ", "<function done=\"true\" "),
-        );
-      }
-    }
 
     return Expanded(
       child: MessageList(
@@ -449,6 +519,9 @@ class _ChatPageState extends State<ChatPage> {
     return null;
   }
 
+  // Flag to track whether a tool result message has been added to prevent duplicates
+  bool _toolResultMessageAdded = false;
+
   Future<void> _sendToolCallAndProcessResponse(
       String toolName, Map<String, dynamic> toolArguments) async {
     final clientName =
@@ -458,27 +531,90 @@ class _ChatPageState extends State<ChatPage> {
     final mcpClient = ProviderManager.mcpServerProvider.getClient(clientName);
     if (mcpClient == null) return;
 
-    final response = await mcpClient.sendToolCall(
-      name: toolName,
-      arguments: toolArguments,
-    );
-
+    // Reset the flag when processing a new tool call
     setState(() {
-      _currentResponse = response.result['content'].toString();
-      if (_currentResponse.isNotEmpty) {
-        _parentMessageId = _messages.last.messageId;
+      _toolResultMessageAdded = false;
+    });
+
+    try {
+      final response = await mcpClient.sendToolCall(
+        name: toolName,
+        arguments: toolArguments,
+      );
+
+      setState(() {
+        _currentResponse = response.result['content'].toString();
+        // We'll only add the message once here - the main loop doesn't need to add it again
+        if (_currentResponse.isNotEmpty && !_toolResultMessageAdded) {
+          // that triggered the function call
+          final msgId = Uuid().v4();
+          _messages.add(ChatMessage(
+            messageId: msgId,
+            content:
+                "<call_function_result name=\"$toolName\">\n$_currentResponse\n</call_function_result>",
+            // This is a user message containing the function result
+            role: MessageRole.user,
+            name: toolName,
+            toolCallId: toolName,
+            parentMessageId: _parentMessageId,
+          ));
+          // Update the parent message ID for the next message
+          _parentMessageId = msgId;
+          _toolResultMessageAdded =
+              true; // Mark that the message has been added
+        }
+      });
+    } on TimeoutException catch (error) {
+      // Specifically handle timeout exceptions from SSE client
+      Logger.root.severe('MCP tool call timed out: $error');
+
+      // Import the function_calling.dart utility for timeout message
+      final timeoutMessage = fc.generateToolCallTimeoutMessage(toolName);
+
+      setState(() {
+        _currentResponse = timeoutMessage;
+
+        // Add the timeout message as a user message to continue conversation
         final msgId = Uuid().v4();
         _messages.add(ChatMessage(
           messageId: msgId,
           content:
-              '<call_function_result name="$toolName">\n$_currentResponse\n</call_function_result>',
-          role: MessageRole.assistant,
+              "<call_function_result name=\"$toolName\">\n$timeoutMessage\n</call_function_result>",
+          role: MessageRole.user,
           name: toolName,
+          toolCallId: toolName,
           parentMessageId: _parentMessageId,
         ));
+        // Update the parent message ID for the next message
         _parentMessageId = msgId;
-      }
-    });
+      });
+    } catch (error) {
+      // Handle other exceptions from MCP clients
+      Logger.root.severe('MCP tool call failed: $error');
+
+      // Generate a generic error message
+      final errorMessage =
+          "Error calling tool '$toolName': ${error.toString()}";
+
+      setState(() {
+        _currentResponse = errorMessage;
+
+        // Add the error message as a user message to continue conversation
+        final msgId = Uuid().v4();
+        _messages.add(ChatMessage(
+          messageId: msgId,
+          content:
+              "<call_function_result name=\"$toolName\">\n$errorMessage\n</call_function_result>",
+          role: MessageRole.user,
+          name: toolName,
+          toolCallId: toolName,
+          parentMessageId: _parentMessageId,
+        ));
+
+        // Update the parent message ID for the next message
+        _parentMessageId = msgId;
+      });
+    }
   }
 
   ChatMessage? _findUserMessage(ChatMessage message) {
@@ -510,6 +646,10 @@ class _ChatPageState extends State<ChatPage> {
       _messages = previousMessages;
       _parentMessageId = userMessage.messageId;
       _isLoading = true;
+      _isFinalAnswerReceived =
+          false; // Reset the final answer flag when retrying
+      _toolResultMessageAdded =
+          false; // Reset the tool result flag when retrying
     });
 
     await _handleSubmitted(
@@ -521,64 +661,34 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Future<bool> _checkNeedToolCallFunction() async {
-    if (_runFunctionEvent != null) return true;
+  Future<bool> _checkNeedToolCallXml() async {
+    Logger.root.info('Checking for tool calls in XML format...');
 
-    final lastMessage = _messages.last;
-
-    final content = lastMessage.content ?? '';
-    if (content.isEmpty) return false;
-
-    final messages = _messages
-        .where((m) =>
-            m.content != null &&
-            !m.content!.startsWith('<function') &&
-            !m.content!.startsWith('<call_function_result'))
-        .toList();
-
-    Logger.root.info('check need tool call: $messages');
-
-    final result = await _llmClient!.checkToolCall(
-      ProviderManager.chatModelProvider.currentModel.name,
-      CompletionRequest(
-        model: ProviderManager.chatModelProvider.currentModel.name,
-        messages: [
-          ..._prepareMessageList(),
-        ],
-      ),
-      ProviderManager.mcpServerProvider.tools,
-    );
-    final needToolCall = result['need_tool_call'] ?? false;
-
-    if (!needToolCall) {
-      return false;
+    // If there's a pending function event, we should process it first
+    if (_runFunctionEvent != null) {
+      Logger.root
+          .info('Found pending function event: ${_runFunctionEvent!.name}');
+      return true;
     }
 
-    _runFunctionEvent = RunFunctionEvent(
-      result['tool_calls'][0]['name'],
-      result['tool_calls'][0]['arguments'],
-    );
-
-    _messages.add(ChatMessage(
-      content:
-          "<function name=\"${_runFunctionEvent!.name}\">\n${jsonc.encode(_runFunctionEvent!.arguments)}\n</function>",
-      role: MessageRole.assistant,
-      parentMessageId: _parentMessageId,
-    ));
-
-    _onRunFunction(_runFunctionEvent!);
-
-    return needToolCall;
-  }
-
-  Future<bool> _checkNeedToolCallXml() async {
-    if (_runFunctionEvent != null) return true;
-
     final lastMessage = _messages.last;
-    if (lastMessage.role == MessageRole.user) return true;
+    // Check if the last message is from a user and if it's a tool result that's already been processed
+    if (lastMessage.role == MessageRole.user) {
+      // Skip processing if this is a tool result message that we've already added
+      if (lastMessage.toolCallId != null && _toolResultMessageAdded) {
+        Logger.root.info(
+            'Last message is a tool result that was already processed, skipping duplicate processing');
+        return false;
+      }
+      Logger.root.info('Last message is from user, need to process it');
+      return true;
+    }
 
     final content = lastMessage.content ?? '';
-    if (content.isEmpty) return false;
+    if (content.isEmpty) {
+      Logger.root.info('Last message content is empty, no tool calls');
+      return false;
+    }
 
     // 使用正则表达式检查是否包含 <function name=*>*</function> 格式的标签
     final RegExp functionTagRegex = RegExp(
@@ -586,16 +696,63 @@ class _ChatPageState extends State<ChatPage> {
         dotAll: true);
     final match = functionTagRegex.firstMatch(content);
 
-    if (match == null) return false;
+    if (match == null) {
+      Logger.root.info('No function tags found in content');
+      return false;
+    }
 
     final toolName = match.group(1);
     final toolArguments = match.group(2);
 
-    if (toolName == null || toolArguments == null) return false;
+    if (toolName == null || toolArguments == null) {
+      Logger.root.info('Found function tag but missing name or arguments');
+      return false;
+    }
 
+    Logger.root.info('Found tool call: $toolName');
+
+    // Check for built-in tool calls
+    if (toolName == 'final_answer') {
+      // Parse the final answer content
+      final answerMap = jsonc.decode(toolArguments);
+      final finalAnswer = answerMap['answer'] as String? ?? '';
+      final command = answerMap['command'] as String?;
+
+      Logger.root.info('Found final_answer tool call');
+
+      // Create the FinalAnswerEvent
+      final event = fc.FinalAnswerEvent(finalAnswer, command);
+      _onFinalAnswer(event);
+
+      return false; // Return false to stop the tool calling loop
+    } else if (toolName == 'followup_question') {
+      // Parse the question content
+      final questionMap = jsonc.decode(toolArguments);
+      final question = questionMap['question'] as String? ?? '';
+      final options = questionMap['options'] as List<dynamic>?;
+
+      List<String>? optionsList;
+      if (options != null) {
+        optionsList = options.map((option) => option.toString()).toList();
+      }
+
+      Logger.root.info('Found followup_question tool call');
+
+      // Create the AskFollowupQuestionEvent
+      final event = fc.AskFollowupQuestionEvent(question, optionsList);
+      _onAskFollowupQuestion(event);
+
+      // We should wait for user input, so stop the tool calling loop
+      return false;
+    }
+
+    // Process regular tool call
+    Logger.root.info('Processing regular tool call: $toolName');
     final toolArgumentsMap = jsonc.decode(toolArguments);
 
-    _onRunFunction(RunFunctionEvent(toolName, toolArgumentsMap));
+    // Create the run function event but don't trigger _onRunFunction here
+    // This will be handled by the main handleSubmitted loop
+    _runFunctionEvent = new RunFunctionEvent(toolName, toolArgumentsMap);
 
     return true;
   }
@@ -605,10 +762,14 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   // 消息提交处理
+
   Future<void> _handleSubmitted(SubmitData data,
       {bool addUserMessage = true}) async {
     setState(() {
       _isCancelled = false;
+      _isFinalAnswerReceived =
+          false; // Reset the final answer flag at the start
+      _toolResultMessageAdded = false; // Reset the tool result message flag
     });
     final files = data.files.map((file) => platformFileToFile(file)).toList();
 
@@ -617,9 +778,41 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     try {
-      while (await _checkNeedToolCall()) {
-        if (_runFunctionEvent != null) {
-          // 等待用户授权
+      // Continue tool call cycle until final_answer is received
+      bool shouldContinue = true;
+      int iterationCount = 0;
+      final maxIterations = 10; // Safeguard against infinite loops
+
+      // Main loop - will keep running until we get a final answer or there's no more tool calls
+      do {
+        iterationCount++;
+        Logger.root.info('Starting tool call cycle iteration $iterationCount');
+
+        // Break out if we've exceeded max iterations (safety measure)
+        if (iterationCount > maxIterations) {
+          Logger.root
+              .warning('Exceeded maximum tool call iterations. Breaking loop.');
+
+          // Add a final message to indicate the loop was terminated
+          final msgId = Uuid().v4();
+          _messages.add(ChatMessage(
+            messageId: msgId,
+            content:
+                "Conversation exceeded maximum iterations. Please provide a final answer or ask a followup question.",
+            role: MessageRole.user,
+            parentMessageId: _parentMessageId,
+          ));
+          _parentMessageId = msgId;
+
+          break;
+        }
+
+        // 1. First, check if there's a tool call to process
+        bool foundToolCall = await _checkNeedToolCall();
+
+        // 2. If found a tool call, process it
+        if (foundToolCall && _runFunctionEvent != null) {
+          // Handle tool approval
           final event = _runFunctionEvent!;
           final approved = await _showFunctionApprovalDialog(event);
 
@@ -635,8 +828,13 @@ class _ChatPageState extends State<ChatPage> {
               _isRunningFunction = false;
             });
             _runFunctionEvent = null;
+
+            // After processing a tool call, check if we need to wait for LLM response
+            // or if we already have a final answer/followup question
+            shouldContinue =
+                !_isFinalAnswerReceived && _askFollowupQuestionEvent == null;
           } else {
-            // 用户拒绝了函数调用
+            // User rejected the tool call
             setState(() {
               _userRejected = false;
               _runFunctionEvent = null;
@@ -644,16 +842,108 @@ class _ChatPageState extends State<ChatPage> {
             final msgId = Uuid().v4();
             _messages.add(ChatMessage(
               messageId: msgId,
-              content: '用户取消了工具调用',
-              role: MessageRole.assistant,
+              content: 'User rejected the tool call.',
+              role: MessageRole.user,
               parentMessageId: _parentMessageId,
             ));
             _parentMessageId = msgId;
+
+            // Continue the conversation after rejection with a reminder
+            shouldContinue = true;
           }
         }
 
-        await _processLLMResponse();
-      }
+        // 3. Check if the last message is from the assistant without a proper function call
+        if (_messages.isNotEmpty &&
+            _messages.last.role == MessageRole.assistant) {
+          final lastContent = _messages.last.content ?? '';
+
+          // If the last message is an assistant message without proper function use
+          if (!_isFunctionCallMessage(lastContent) &&
+              !_isFollowupQuestionMessage(lastContent) &&
+              !_isFinalAnswerMessage(lastContent) &&
+              !_isFinalAnswerReceived) {
+            // Check if content has substantial text and count improper responses
+            final contentLength = lastContent.trim().length;
+            final hasSubstantialContent = contentLength > 100;
+            final consecutiveImproperResponses =
+                _countConsecutiveImproperResponses();
+
+            // Only add reminder if content is short or this is at least the second improper response
+            if (!hasSubstantialContent || consecutiveImproperResponses > 1) {
+              Logger.root.info(
+                  'Last message is an assistant message without proper function use');
+
+              // Add reminder for the LLM to use functions properly
+              final msgId = Uuid().v4();
+              _messages.add(ChatMessage(
+                messageId: msgId,
+                content: toolNotProvided,
+                role: MessageRole.user,
+                parentMessageId: _parentMessageId,
+              ));
+              _parentMessageId = msgId;
+            }
+          }
+        }
+
+        // 4. Process LLM response if we should continue and haven't received a final answer
+        if (shouldContinue && !_isFinalAnswerReceived) {
+          await _processLLMResponse();
+
+          // After LLM response, check if the response contains a valid function call, final answer, or followup question
+          if (_messages.isNotEmpty &&
+              _messages.last.role == MessageRole.assistant) {
+            final content = _messages.last.content ?? '';
+
+            if (_isFunctionCallMessage(content) ||
+                _isFollowupQuestionMessage(content) ||
+                _isFinalAnswerMessage(content)) {
+              Logger.root.info(
+                  'Response contains valid function call, final answer, or followup question');
+              shouldContinue = true;
+            } else {
+              Logger.root.info(
+                  'Response does not contain valid function call, final answer, or followup question');
+
+              // Check if the content has substantial text and this isn't just a short response
+              final contentLength = content.trim().length;
+              final hasSubstantialContent = contentLength > 100;
+              final consecutiveImproperResponses =
+                  _countConsecutiveImproperResponses();
+
+              // Only add reminder if content is short or this is at least the second improper response
+              if (!hasSubstantialContent || consecutiveImproperResponses > 1) {
+                // Add reminder for the LLM
+                final msgId = Uuid().v4();
+                _messages.add(ChatMessage(
+                  messageId: msgId,
+                  content: toolNotProvided,
+                  role: MessageRole.user,
+                  parentMessageId: _parentMessageId,
+                ));
+                _parentMessageId = msgId;
+              }
+              shouldContinue = true;
+            }
+          }
+        }
+
+        // 5. If we got a final answer or followup question in this iteration, stop the cycle
+        if (_isFinalAnswerReceived || _askFollowupQuestionEvent != null) {
+          Logger.root.info(
+              'Final answer or followup question received, ending tool call cycle');
+          shouldContinue = false;
+        }
+
+        // Log current state for debugging
+        Logger.root.info(
+            'End of iteration $iterationCount: shouldContinue=$shouldContinue, isFinalAnswerReceived=$_isFinalAnswerReceived');
+      } while (shouldContinue &&
+          !_isFinalAnswerReceived &&
+          _askFollowupQuestionEvent == null &&
+          iterationCount < maxIterations);
+
       await _updateChat();
     } catch (e, stackTrace) {
       _handleError(e, stackTrace);
@@ -729,7 +1019,49 @@ class _ChatPageState extends State<ChatPage> {
       _isWating = true;
     });
 
+    // Prepare the message list without automatically adding reminder messages
     final List<ChatMessage> messageList = _prepareMessageList();
+    final lastMessageIndex = messageList.length - 1;
+
+    // We'll only add a reminder if this is at least the second time we're seeing
+    // an improper assistant response in a row
+    bool shouldAddReminder = false;
+
+    // Check if there are at least 2 consecutive assistant messages without proper function calls
+    if (messageList.isNotEmpty &&
+        lastMessageIndex >= 1 &&
+        messageList[lastMessageIndex].role == MessageRole.assistant &&
+        messageList[lastMessageIndex - 1].role == MessageRole.assistant) {
+      final lastContent = messageList[lastMessageIndex].content ?? '';
+      final prevContent = messageList[lastMessageIndex - 1].content ?? '';
+
+      // Only add a reminder if both messages lack proper function calls
+      if ((!_isFunctionCallMessage(lastContent) &&
+              !_isFollowupQuestionMessage(lastContent) &&
+              !_isFinalAnswerMessage(lastContent)) &&
+          (!_isFunctionCallMessage(prevContent) &&
+              !_isFollowupQuestionMessage(prevContent) &&
+              !_isFinalAnswerMessage(prevContent))) {
+        shouldAddReminder = true;
+      }
+    }
+
+    // Add a reminder only when necessary
+    if (shouldAddReminder) {
+      final msgId = Uuid().v4();
+      final reminderMsg = ChatMessage(
+        messageId: msgId,
+        content:
+            "Please use a function call, provide a final_answer, or ask a followup_question. The LLM should always use these mechanisms for responses.",
+        role: MessageRole.user,
+        parentMessageId: _parentMessageId,
+      );
+
+      messageList.add(reminderMsg);
+      // Update the parent message ID
+      _parentMessageId = msgId;
+    }
+
     Logger.root.info('start process llm response: $messageList');
 
     final modelSetting = ProviderManager.settingsProvider.modelSetting;
@@ -740,7 +1072,8 @@ class _ChatPageState extends State<ChatPage> {
 
     final systemPrompt = await _getSystemPrompt();
 
-    if (ProviderManager.serverStateProvider.enabledCount > 0) {
+    if (ProviderManager.serverStateProvider.enabledCount > 0 &&
+        lastUserMessageIndex >= 0) {
       messageList[lastUserMessageIndex] =
           messageList[lastUserMessageIndex].copyWith(
         content: await _getLasstUserMessagePrompt(
@@ -755,12 +1088,7 @@ class _ChatPageState extends State<ChatPage> {
           content: systemPrompt,
           role: MessageRole.system,
         ),
-        // ...messageList.map((m) => m.copyWith(
-        //       content: m.content?.replaceAll("done=\"true\"", ""),
-        //     )),
-        ...messageList.where((m) =>
-            !m.content!.startsWith('<function') ||
-            !m.content!.startsWith('<call_function_result')),
+        ...messageList,
       ],
       modelSetting: modelSetting,
     ));
@@ -768,6 +1096,27 @@ class _ChatPageState extends State<ChatPage> {
     _initializeAssistantResponse();
     await _processResponseStream(stream);
     Logger.root.info('end process llm response');
+  }
+
+  // Helper methods to identify different types of function-related messages
+  bool _isFunctionCallMessage(String content) {
+    // Check for any function tag with more flexible pattern matching
+    return RegExp('<function\\s+name=', caseSensitive: false).hasMatch(content);
+  }
+
+  bool _isFollowupQuestionMessage(String content) {
+    // More flexible matching for followup question
+    return RegExp('<function\\s+name=["\']followup_question["\']',
+            caseSensitive: false)
+        .hasMatch(content);
+  }
+
+  bool _isFinalAnswerMessage(String content) {
+    Logger.root.info('isFinalAnswerMessage: $content');
+    // More flexible matching for final answer
+    return RegExp('<function\\s+name=["\']final_answer["\']',
+            caseSensitive: false)
+        .hasMatch(content);
   }
 
   List<ChatMessage> _prepareMessageList() {
@@ -782,20 +1131,35 @@ class _ChatPageState extends State<ChatPage> {
             ))
         .toList();
 
-    _reorderMessages(messageList);
     return messageList;
   }
 
-  void _reorderMessages(List<ChatMessage> messageList) {
-    for (int i = 0; i < messageList.length - 1; i++) {
-      if (messageList[i].role == MessageRole.user &&
-          messageList[i + 1].role == MessageRole.tool) {
-        final temp = messageList[i];
-        messageList[i] = messageList[i + 1];
-        messageList[i + 1] = temp;
-        i++;
+  // Helper method to count consecutive improper LLM responses
+  int _countConsecutiveImproperResponses() {
+    int count = 0;
+    // Start from the end of the messages and go backwards
+    for (int i = _messages.length - 1; i >= 0; i--) {
+      final message = _messages[i];
+
+      // Only count assistant messages
+      if (message.role == MessageRole.assistant) {
+        final content = message.content ?? '';
+
+        // If this message lacks proper function tags, increment the count
+        if (!_isFunctionCallMessage(content) &&
+            !_isFollowupQuestionMessage(content) &&
+            !_isFinalAnswerMessage(content)) {
+          count++;
+        } else {
+          // We found a proper response, so break the chain
+          break;
+        }
+      } else {
+        // If we hit a user message, break the chain
+        break;
       }
     }
+    return count;
   }
 
   void _initializeAssistantResponse() {
@@ -813,6 +1177,15 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _processResponseStream(Stream<LLMResponse> stream) async {
     bool isFirstChunk = true;
+    bool hasToolCall = false;
+    bool hasFollowupQuestion = false;
+    bool hasFinalAnswer = false;
+
+    setState(() {
+      _askFollowupQuestionEvent =
+          null; // Reset any previous followup question event
+    });
+
     await for (final chunk in stream) {
       if (isFirstChunk) {
         setState(() {
@@ -820,17 +1193,79 @@ class _ChatPageState extends State<ChatPage> {
         });
         isFirstChunk = false;
       }
+
       if (_isCancelled) break;
+
+      // Append the new content to our cumulative response
+      final newContent = chunk.content ?? '';
+      _currentResponse += newContent;
+
+      // Check if this chunk contains any function call tags
+      if (newContent.contains('<function name=')) {
+        if (!hasToolCall) {
+          Logger.root.info('Found tool call in stream chunk');
+          hasToolCall = true;
+        }
+
+        // Check for specific types of function calls
+        if (newContent.contains('<function name="followup_question">')) {
+          hasFollowupQuestion = true;
+        } else if (newContent.contains('<function name="final_answer">')) {
+          hasFinalAnswer = true;
+        }
+      }
+
+      // Update the message in the UI
       setState(() {
-        _currentResponse += chunk.content ?? '';
+        final msgId = Uuid().v4();
         _messages.last = ChatMessage(
-          content: _currentResponse,
-          role: MessageRole.assistant,
-          parentMessageId: _parentMessageId,
-        );
+            content: _currentResponse,
+            role: MessageRole.assistant,
+            parentMessageId: _parentMessageId,
+            messageId: msgId);
+        //set the
+        _parentMessageId = msgId;
       });
     }
+
+    Logger.root.info(
+        'Response stream completed, hasToolCall=$hasToolCall, hasFinalAnswer=$hasFinalAnswer, hasFollowupQuestion=$hasFollowupQuestion');
     _isCancelled = false;
+
+    // After receiving the complete response, check if the response is valid
+    if (hasToolCall) {
+      Logger.root.info('Processing tool call after stream completion');
+      // The next iteration of the main loop will handle this tool call
+    } else if (!hasFinalAnswer && !hasFollowupQuestion) {
+      // The LLM didn't use any of the expected mechanisms
+      Logger.root.info(
+          'LLM did not provide a valid response (no function call, final answer, or followup question)');
+
+      // Check if the content contains substantial text (more than just a brief response)
+      final contentLength = _currentResponse.trim().length;
+      final hasSubstantialContent = contentLength > 100;
+
+      // Only add a reminder if the response is very short (likely incomplete)
+      // or if this is at least the second time we're seeing an improper response
+      final consecutiveImproperResponses = _countConsecutiveImproperResponses();
+
+      if (!hasSubstantialContent || consecutiveImproperResponses > 1) {
+        // Add a message to remind the LLM to use functions
+        final msgId = Uuid().v4();
+        _messages.add(ChatMessage(
+          messageId: msgId,
+          content: toolNotProvided,
+          role: MessageRole.user,
+          parentMessageId: _parentMessageId,
+        ));
+
+        // Update the parent message ID for the next message
+        _parentMessageId = msgId;
+
+        // We need to process the response again to get a valid response
+        await _processLLMResponse();
+      }
+    }
   }
 
   Future<void> _updateChat() async {
@@ -849,29 +1284,85 @@ class _ChatPageState extends State<ChatPage> {
     Logger.root.info('create new chat: $title');
   }
 
-  // messages parentMessageId 处理
+  // Handles parentMessageId relationships for all messages in the chat
   List<ChatMessage> _handleParentMessageId(List<ChatMessage> messages) {
     if (messages.isEmpty) return [];
 
-    // 找到最后一条用户消息的索引
-    int lastUserIndex =
-        messages.lastIndexWhere((m) => m.role == MessageRole.user);
-    if (lastUserIndex == -1) return messages;
+    // Create a copy to avoid modifying the original list
+    List<ChatMessage> processedMessages = List.from(messages);
 
-    // 获取从最后一条用户消息开始的所有消息
-    List<ChatMessage> relevantMessages = messages.sublist(lastUserIndex);
+    // Create a message ID map to quickly find message positions
+    Map<String, int> messageIdToIndex = {};
+    for (int i = 0; i < processedMessages.length; i++) {
+      messageIdToIndex[processedMessages[i].messageId] = i;
+    }
 
-    // 如果消息数大于2，重置第二条之后消息的parentMessageId
-    if (relevantMessages.length > 2) {
-      String secondMessageId = relevantMessages[1].messageId;
-      for (int i = 2; i < relevantMessages.length; i++) {
-        relevantMessages[i] = relevantMessages[i].copyWith(
-          parentMessageId: secondMessageId,
+    // First pass: ensure all messages have valid parentMessageId
+    for (int i = 1; i < processedMessages.length; i++) {
+      ChatMessage currentMsg = processedMessages[i];
+
+      // If parentMessageId is empty or points to a non-existent message
+      if (currentMsg.parentMessageId.isEmpty ||
+          !messageIdToIndex.containsKey(currentMsg.parentMessageId)) {
+        // Set parent to the previous message
+        processedMessages[i] = currentMsg.copyWith(
+          parentMessageId: processedMessages[i - 1].messageId,
         );
       }
     }
 
-    return relevantMessages;
+    // Second pass: handle function calls, tools and their results properly
+    for (int i = 0; i < processedMessages.length; i++) {
+      final msg = processedMessages[i];
+
+      // Check if this is a function call message
+      bool isFunctionCall = msg.role == MessageRole.assistant &&
+          (msg.content?.contains('<function') ?? false);
+
+      // Check if this is a function result message
+      bool isFunctionResult = msg.role == MessageRole.user &&
+          (msg.toolCallId != null ||
+              (msg.content?.contains('<call_function_result') ?? false));
+
+      // Make sure function results have the function call as parent
+      if (isFunctionResult && i > 0) {
+        // Look backward to find the most recent function call
+        int functionCallIndex = -1;
+        for (int j = i - 1; j >= 0; j--) {
+          if (processedMessages[j].role == MessageRole.assistant &&
+              (processedMessages[j].content?.contains('<function') ?? false)) {
+            functionCallIndex = j;
+            break;
+          }
+        }
+
+        if (functionCallIndex != -1) {
+          // Update the function result to have the function call as parent
+          processedMessages[i] = processedMessages[i].copyWith(
+            parentMessageId: processedMessages[functionCallIndex].messageId,
+          );
+        }
+      }
+
+      // Look ahead to find responses to this message and update their parentMessageId if needed
+      if (i < processedMessages.length - 1) {
+        for (int j = i + 1; j < processedMessages.length; j++) {
+          // For assistant messages following a user message
+          if (msg.role == MessageRole.user &&
+              processedMessages[j].role == MessageRole.assistant &&
+              j == i + 1) {
+            processedMessages[j] = processedMessages[j].copyWith(
+              parentMessageId: msg.messageId,
+            );
+            break; // Only update the immediate next assistant message
+          }
+        }
+      }
+    }
+
+    // Logger.root.info('Processed message chain: ${processedMessages.map((m) => "${m.role} - ${m.messageId} - parent: ${m.parentMessageId}").join('\n')}');
+
+    return processedMessages;
   }
 
   Future<void> _updateExistingChat() async {
@@ -899,6 +1390,9 @@ class _ChatPageState extends State<ChatPage> {
       _isLoading = false;
       _isCancelled = false;
       _isWating = false;
+      _isFinalAnswerReceived =
+          false; // Also reset the final answer flag on error
+      _toolResultMessageAdded = false; // Reset the tool result flag on error
     });
 
     if (mounted) {

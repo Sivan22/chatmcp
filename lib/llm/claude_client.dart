@@ -30,16 +30,12 @@ class ClaudeClient extends BaseLLMClient {
     final body = {
       'model': request.model,
       'messages': messages,
+      'max_tokens': request.modelSetting?.maxTokens ?? 1024,
     };
 
     if (request.modelSetting != null) {
       body['temperature'] = request.modelSetting!.temperature;
       body['top_p'] = request.modelSetting!.topP;
-      body['frequency_penalty'] = request.modelSetting!.frequencyPenalty;
-      body['presence_penalty'] = request.modelSetting!.presencePenalty;
-      if (request.modelSetting!.maxTokens != null) {
-        body['max_tokens'] = request.modelSetting!.maxTokens!;
-      }
     }
 
     if (request.tools != null && request.tools!.isNotEmpty) {
@@ -95,18 +91,14 @@ class ClaudeClient extends BaseLLMClient {
 
     final body = {
       'model': request.model,
-      'messages': messages,
+      'messages': messages,      
+      'max_tokens': request.modelSetting?.maxTokens ?? 1024,
       'stream': true,
     };
 
     if (request.modelSetting != null) {
       body['temperature'] = request.modelSetting!.temperature;
       body['top_p'] = request.modelSetting!.topP;
-      body['frequency_penalty'] = request.modelSetting!.frequencyPenalty;
-      body['presence_penalty'] = request.modelSetting!.presencePenalty;
-      if (request.modelSetting!.maxTokens != null) {
-        body['max_tokens'] = request.modelSetting!.maxTokens!;
-      }
     }
 
     if (request.tools != null && request.tools!.isNotEmpty) {

@@ -65,6 +65,7 @@ class ChatMessage {
   final List<File>? files;
   List<String>? brotherMessageIds;
   List<String>? childMessageIds;
+  final bool isFinalAnswer; // New field to identify final answers
 
   ChatMessage({
     required this.role,
@@ -78,6 +79,7 @@ class ChatMessage {
     this.childMessageIds,
     String? messageId,
     String? parentMessageId,
+    this.isFinalAnswer = false, // Default to false
   })  : messageId = messageId ?? Uuid().v4(),
         parentMessageId = parentMessageId ?? '';
 
@@ -114,6 +116,8 @@ class ChatMessage {
       json['childMessageIds'] = childMessageIds;
     }
 
+    json['isFinalAnswer'] = isFinalAnswer;
+
     return json;
   }
 
@@ -149,6 +153,7 @@ class ChatMessage {
       files: files,
       messageId: messageId,
       parentMessageId: parentMessageId,
+      isFinalAnswer: json['isFinalAnswer'] ?? false,
     );
   }
 
@@ -161,6 +166,7 @@ class ChatMessage {
     String? messageId,
     String? parentMessageId,
     String? content,
+    bool? isFinalAnswer,
   }) {
     return ChatMessage(
       messageId: messageId ?? this.messageId,
@@ -172,6 +178,7 @@ class ChatMessage {
       toolCallId: toolCallId,
       toolCalls: toolCalls,
       files: files,
+      isFinalAnswer: isFinalAnswer ?? this.isFinalAnswer,
     );
   }
 }

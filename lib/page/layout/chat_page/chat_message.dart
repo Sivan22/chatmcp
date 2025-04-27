@@ -332,7 +332,7 @@ class ChatMessageContent extends StatelessWidget {
       ));
     }
 
-    if (message.role == MessageRole.tool && message.toolCallId != null) {
+    if (message.toolCallId != null) {
       messages.add(MessageBubble(
         message: message,
         position: position,
@@ -454,20 +454,37 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isFinalAnswer = message.isFinalAnswer;
+
     return Container(
       margin: _getMargin(),
       padding: _getPadding(),
       decoration: BoxDecoration(
-        color: useTransparentBackground
-            ? Colors.transparent
-            : AppColors.getMessageBubbleBackgroundColor(
-                context, message.role == MessageRole.user),
+        color: isFinalAnswer
+            ? Colors.green
+                .withOpacity(0.1) // Light green background for final answers
+            : useTransparentBackground
+                ? Colors.transparent
+                : AppColors.getMessageBubbleBackgroundColor(
+                    context, message.role == MessageRole.user),
         borderRadius: _getBorderRadius(),
+        border: isFinalAnswer
+            ? Border.all(
+                color: Colors.green,
+                width: 1.0) // Green border for final answers
+            : null,
       ),
       child: message.content != null
           ? message.role == MessageRole.user
               ? Markit(data: (message.content!).trim())
-              : Markit(data: (message.content!).trim())
+              : Markit(
+                  data: (message.content!).trim(),
+                  textStyle: isFinalAnswer
+                      ? TextStyle(
+                          color: Colors
+                              .green.shade800) // Green text for final answers
+                      : null,
+                )
           : const Text(''),
     );
   }
