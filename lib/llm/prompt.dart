@@ -128,6 +128,7 @@ You accomplish a given task iteratively, breaking it down into clear steps and w
       'You are an intelligent assistant capable of using tools to solve user queries effectively.';
 
   final String jewishLibraryPrompt = '''
+======
 
 JEWISH LIBRARY USAGE GUIDELINES
 

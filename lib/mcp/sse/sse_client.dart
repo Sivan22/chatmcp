@@ -220,7 +220,9 @@ class SSEClient implements McpClient {
     final initResponse = await sendMessage(initMessage);
     Logger.root.info('Initialization response: $initResponse');
 
-    final notifyMessage = JSONRPCMessage(method: 'initialized', params: {});
+    // Step 2: Send initialization complete notification (no response needed)
+    final notifyMessage =
+        JSONRPCMessage(method: 'notifications/initialized', params: {});
 
     await _sendHttpPost(notifyMessage.toJson());
     return initResponse;
