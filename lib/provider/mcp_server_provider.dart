@@ -28,12 +28,18 @@ class McpServerProvider extends ChangeNotifier {
 
   // Get configuration file path
   Future<String> get _configFilePath async {
+    if (kIsWeb) {
+      return _configFileName;
+    }
     final directory = await getAppDir('ChatMcp');
     return '${directory.path}/$_configFileName';
   }
 
   // Check and create initial configuration file
   Future<void> _initConfigFile() async {
+    if (kIsWeb) {
+      return;
+    }
     final file = File(await _configFilePath);
 
     if (!await file.exists()) {
@@ -55,6 +61,10 @@ class McpServerProvider extends ChangeNotifier {
 
   // Read server configuration
   Future<Map<String, dynamic>> loadServers() async {
+    if (kIsWeb) {
+      Logger.root.info('loadServers (on web): return mcpServers: {}');
+      return {'mcpServers': <String, dynamic>{}};
+    }
     try {
       await _initConfigFile();
       final file = File(await _configFilePath);
@@ -151,9 +161,11 @@ class McpServerProvider extends ChangeNotifier {
       Logger.root.info('mcp_server path: $configFilePath');
 
       // Add configuration file content log
-      final configFile = File(configFilePath);
-      final configContent = await configFile.readAsString();
-      Logger.root.info('mcp_server config: $configContent');
+      if (!kIsWeb) {
+        final configFile = File(configFilePath);
+        final configContent = await configFile.readAsString();
+        Logger.root.info('mcp_server config: $configContent');
+      }
 
       final ignoreServers = <String>[];
       for (var entry in clients.entries) {
@@ -173,7 +185,7 @@ class McpServerProvider extends ChangeNotifier {
       Logger.root.severe(
           'Failed to initialize MCP servers: $e, stackTrace: $stackTrace');
       // Print more detailed error information
-      if (e is TypeError) {
+      if (e is TypeError && !kIsWeb) {
         final configFile = File(await _configFilePath);
         final content = await configFile.readAsString();
         Logger.root.severe(

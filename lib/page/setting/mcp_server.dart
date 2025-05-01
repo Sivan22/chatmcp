@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:chatmcp/components/widgets/base.dart';
 import 'package:chatmcp/provider/provider_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
@@ -722,10 +723,10 @@ class _McpServerState extends State<McpServer> {
                   final values = formKey.currentState!.value;
                   final commandValue = values['command'] as String;
 
-                  if ((Platform.isIOS || Platform.isAndroid) &&
+                  if ((kIsWeb || Platform.isIOS || Platform.isAndroid) &&
                       !commandValue.trim().startsWith('http')) {
-                    showErrorDialog(
-                        dialogContext, 'Mobile only supports mcp sse servers');
+                    showErrorDialog(dialogContext,
+                        'Web and Mobile only supports mcp sse servers');
                     return;
                   }
                   Navigator.pop(dialogContext, true);

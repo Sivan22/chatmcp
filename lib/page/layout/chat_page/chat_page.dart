@@ -21,7 +21,7 @@ import 'chat_message_to_image.dart';
 import 'package:chatmcp/utils/event_bus.dart';
 import 'chat_code_preview.dart';
 import 'package:chatmcp/generated/app_localizations.dart';
-import 'package:jsonc/jsonc.dart';
+import 'dart:convert';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -697,7 +697,7 @@ class _ChatPageState extends State<ChatPage> {
     // Check for built-in tool calls
     if (toolName == 'final_answer') {
       // Parse the final answer content
-      final answerMap = jsonc.decode(toolArguments);
+      final answerMap = json.decode(toolArguments);
       final finalAnswer = answerMap['answer'] as String? ?? '';
       final command = answerMap['command'] as String?;
 
@@ -710,7 +710,7 @@ class _ChatPageState extends State<ChatPage> {
       return false; // Return false to stop the tool calling loop
     } else if (toolName == 'followup_question') {
       // Parse the question content
-      final questionMap = jsonc.decode(toolArguments);
+      final questionMap = json.decode(toolArguments);
       final question = questionMap['question'] as String? ?? '';
       final options = questionMap['options'] as List<dynamic>?;
 
@@ -731,11 +731,11 @@ class _ChatPageState extends State<ChatPage> {
 
     // Process regular tool call
     Logger.root.info('Processing regular tool call: $toolName');
-    final toolArgumentsMap = jsonc.decode(toolArguments);
+    final toolArgumentsMap = json.decode(toolArguments);
 
     // Create the run function event but don't trigger _onRunFunction here
     // This will be handled by the main handleSubmitted loop
-    _runFunctionEvent = new RunFunctionEvent(toolName, toolArgumentsMap);
+    _runFunctionEvent = RunFunctionEvent(toolName, toolArgumentsMap);
 
     return true;
   }

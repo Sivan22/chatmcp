@@ -246,6 +246,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.1"
+  dev_build:
+    dependency: transitive
+    description:
+      name: dev_build
+      sha256: "87abaa4f6cfd50320b229e29a7ef5532d86bc804f3124328c7e9db238ba45b33"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.2+8"
   dotenv:
     dependency: "direct main"
     description:
@@ -682,14 +690,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.9.0"
-  jsonc:
-    dependency: "direct main"
-    description:
-      name: jsonc
-      sha256: "326a3c5c774a77c3c4e327f359e0268bff34135d0c16078beee6d921c49a16ed"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.0.3"
   keyboard_dismisser:
     dependency: "direct main"
     description:
@@ -986,6 +986,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.0.1"
+  process_run:
+    dependency: transitive
+    description:
+      name: process_run
+      sha256: "6ec839cdd3e6de4685318e7686cd4abb523c3d3a55af0e8d32a12ae19bc66622"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.4"
   provider:
     dependency: "direct main"
     description:
@@ -1255,6 +1263,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.4+4"
+  sqflite_common_ffi_web:
+    dependency: "direct main"
+    description:
+      name: sqflite_common_ffi_web
+      sha256: "983cf7b33b16e6bc086c8e09f6a1fae69d34cdb167d7acaf64cbd3515942d4e6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
   sqflite_darwin:
     dependency: transitive
     description:

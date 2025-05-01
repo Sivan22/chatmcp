@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:chatmcp/utils/platform.dart';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:path/path.dart';
 import 'package:logging/logging.dart';
 import 'package:sqflite/sqflite.dart' as sqflite;
@@ -26,13 +28,19 @@ class DatabaseHelper {
       databaseFactory = databaseFactoryFfi;
     } else if (kIsMobile) {
       databaseFactory = sqflite.databaseFactory;
+    } else if (kIsWeb) {
+      databaseFactory = databaseFactoryFfiWeb;
     }
+    String dbPath;
 
-    final Directory appDataDir = await getAppDir('ChatMcp');
-    final dbPath = join(appDataDir.path, 'chatmcp.db');
-
+    if (kIsWeb) {
+      dbPath = 'chatmcp.db';
+    } else {
+      final Directory appDataDir = await getAppDir('ChatMcp');
+      dbPath = join(appDataDir.path, 'chatmcp.db');
+    }
     Logger.root.fine('db path: $dbPath');
-    Logger.root.fine('platform: ${Platform.operatingSystem}');
+    Logger.root.fine('platform:  ${kIsWeb ? 'web' : Platform.operatingSystem}');
 
     final DatabaseSchemaManager schemaManager = DatabaseSchemaManager();
 

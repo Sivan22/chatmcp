@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -93,7 +94,7 @@ class _LayoutPageState extends State<LayoutPage> {
       body: SafeArea(
         child: Row(
           children: [
-            if (kIsDesktop && !hideSidebar)
+            if ((kIsWeb || kIsDesktop) && !hideSidebar)
               Container(
                 width: 250,
                 color: AppColors.getSidebarBackgroundColor(context),

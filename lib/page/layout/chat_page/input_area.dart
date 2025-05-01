@@ -1,5 +1,6 @@
 import 'package:chatmcp/page/layout/widgets/mcp_tools.dart';
 import 'package:chatmcp/provider/provider_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io' show Platform;
@@ -208,10 +209,11 @@ class _InputAreaState extends State<InputArea> {
                         maxLength}) {
                       return null;
                     },
-                    textInputAction: Platform.isAndroid || Platform.isIOS
-                        ? TextInputAction.send
-                        : TextInputAction.newline,
-                    onSubmitted: Platform.isAndroid || Platform.isIOS
+                    textInputAction:
+                        kIsWeb || Platform.isAndroid || Platform.isIOS
+                            ? TextInputAction.send
+                            : TextInputAction.newline,
+                    onSubmitted: kIsWeb || Platform.isAndroid || Platform.isIOS
                         ? (text) {
                             if (widget.isComposing && text.trim().isNotEmpty) {
                               widget.onSubmitted(

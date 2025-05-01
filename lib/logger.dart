@@ -1,4 +1,5 @@
 import 'package:chatmcp/utils/platform.dart';
+import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 import 'dart:io';
 import 'package:path/path.dart' as path;
@@ -71,7 +72,9 @@ class FileLogger {
 
 void initializeLogger() async {
   // Initialize file logger
-  await FileLogger.initLogFile();
+  if (!kIsWeb) {
+    await FileLogger.initLogFile();
+  }
 
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
@@ -126,7 +129,9 @@ void initializeLogger() async {
       return true;
     }());
 
-    // In release mode, write to file
-    FileLogger.writeToFile(logMessage);
+    if (!kIsWeb) {
+      // In release mode, write to file
+      FileLogger.writeToFile(logMessage);
+    }
   });
 }
