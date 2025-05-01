@@ -3,12 +3,14 @@ class ServerConfig {
   final List<String> args;
   final Map<String, String> env;
   final String author;
+  final String type;
 
   const ServerConfig({
     required this.command,
     required this.args,
     this.env = const {},
     this.author = '',
+    this.type = '',
   });
 
   // Create ServerConfig from JSON Map
@@ -18,6 +20,7 @@ class ServerConfig {
       args: (json['args'] as List<dynamic>).cast<String>(),
       env: (json['env'] as Map<String, dynamic>?)?.cast<String, String>() ??
           const {},
+      type: json['type'] as String? ?? '',
     );
   }
 
@@ -28,6 +31,7 @@ class ServerConfig {
       'args': args,
       'env': env,
       'author': author,
+      'type': type,
     };
   }
 }

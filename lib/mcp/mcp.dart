@@ -3,6 +3,7 @@ import './models/server.dart';
 import './client/mcp_client_interface.dart';
 import './stdio/stdio_client.dart';
 import './sse/sse_client.dart';
+import './streamable/streamable_client.dart';
 
 Future<McpClient?> initializeMcpServer(
     Map<String, dynamic> mcpServerConfig) async {
@@ -11,10 +12,34 @@ Future<McpClient?> initializeMcpServer(
 
   // Create appropriate client based on configuration
   McpClient mcpClient;
-  if (serverConfig.command.startsWith('http')) {
-    mcpClient = SSEClient(serverConfig: serverConfig);
+
+  // 首先检查类型字段
+  if (serverConfig.type.isNotEmpty) {
+    switch (serverConfig.type) {
+      case 'sse':
+        mcpClient = SSEClient(serverConfig: serverConfig);
+        break;
+      case 'streamable':
+        mcpClient = StreamableClient(serverConfig: serverConfig);
+        break;
+      case 'stdio':
+        mcpClient = StdioClient(serverConfig: serverConfig);
+        break;
+      default:
+        // 降级为基于命令的逻辑
+        if (serverConfig.command.startsWith('http')) {
+          mcpClient = SSEClient(serverConfig: serverConfig);
+        } else {
+          mcpClient = StdioClient(serverConfig: serverConfig);
+        }
+    }
   } else {
-    mcpClient = StdioClient(serverConfig: serverConfig);
+    // 降级为原来的逻辑
+    if (serverConfig.command.startsWith('http')) {
+      mcpClient = SSEClient(serverConfig: serverConfig);
+    } else {
+      mcpClient = StdioClient(serverConfig: serverConfig);
+    }
   }
 
   // Initialize client
@@ -31,9 +56,37 @@ Future<McpClient?> initializeMcpServer(
 
 Future<bool> verifyMcpServer(Map<String, dynamic> mcpServerConfig) async {
   final serverConfig = ServerConfig.fromJson(mcpServerConfig);
-  final mcpClient = serverConfig.command.startsWith('http')
-      ? SSEClient(serverConfig: serverConfig)
-      : StdioClient(serverConfig: serverConfig);
+
+  McpClient mcpClient;
+
+  // 首先检查类型字段
+  if (serverConfig.type != null && serverConfig.type.isNotEmpty) {
+    switch (serverConfig.type) {
+      case 'sse':
+        mcpClient = SSEClient(serverConfig: serverConfig);
+        break;
+      case 'streamable':
+        mcpClient = StreamableClient(serverConfig: serverConfig);
+        break;
+      case 'stdio':
+        mcpClient = StdioClient(serverConfig: serverConfig);
+        break;
+      default:
+        // 降级为基于命令的逻辑
+        if (serverConfig.command.startsWith('http')) {
+          mcpClient = SSEClient(serverConfig: serverConfig);
+        } else {
+          mcpClient = StdioClient(serverConfig: serverConfig);
+        }
+    }
+  } else {
+    // 降级为原来的逻辑
+    if (serverConfig.command.startsWith('http')) {
+      mcpClient = SSEClient(serverConfig: serverConfig);
+    } else {
+      mcpClient = StdioClient(serverConfig: serverConfig);
+    }
+  }
 
   try {
     await mcpClient.sendInitialize();

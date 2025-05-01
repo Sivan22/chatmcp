@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:typed_data';
-
 import 'package:chatmcp/llm/prompt.dart';
 import 'package:chatmcp/utils/platform.dart';
 import 'package:flutter/material.dart';
@@ -13,7 +12,6 @@ import 'package:logging/logging.dart';
 import 'package:file_picker/file_picker.dart';
 import 'input_area.dart';
 import 'package:chatmcp/provider/provider_manager.dart';
-import 'package:chatmcp/utils/file_content.dart';
 import 'package:chatmcp/dao/chat.dart';
 import 'package:uuid/uuid.dart';
 import 'chat_message_list.dart';
@@ -423,7 +421,6 @@ class _ChatPageState extends State<ChatPage> {
         _userApproved = false;
         _userRejected = false;
         _isFinalAnswerReceived = false; // Reset the final answer flag
-        _toolResultMessageAdded = false; // Reset the tool result flag
       });
       return;
     }
@@ -452,8 +449,6 @@ class _ChatPageState extends State<ChatPage> {
         _userRejected = false;
         _isFinalAnswerReceived =
             false; // Also reset final answer flag when switching chats
-        _toolResultMessageAdded =
-            false; // Reset the tool result flag when switching chats
       });
     }
   }
@@ -519,9 +514,6 @@ class _ChatPageState extends State<ChatPage> {
     return null;
   }
 
-  // Flag to track whether a tool result message has been added to prevent duplicates
-  bool _toolResultMessageAdded = false;
-
   Future<void> _sendToolCallAndProcessResponse(
       String toolName, Map<String, dynamic> toolArguments) async {
     final clientName =
@@ -530,11 +522,6 @@ class _ChatPageState extends State<ChatPage> {
 
     final mcpClient = ProviderManager.mcpServerProvider.getClient(clientName);
     if (mcpClient == null) return;
-
-    // Reset the flag when processing a new tool call
-    setState(() {
-      _toolResultMessageAdded = false;
-    });
 
     try {
       final response = await mcpClient.sendToolCall(
@@ -545,7 +532,7 @@ class _ChatPageState extends State<ChatPage> {
       setState(() {
         _currentResponse = response.result['content'].toString();
         // We'll only add the message once here - the main loop doesn't need to add it again
-        if (_currentResponse.isNotEmpty && !_toolResultMessageAdded) {
+        if (_currentResponse.isNotEmpty) {
           // that triggered the function call
           final msgId = Uuid().v4();
           _messages.add(ChatMessage(
@@ -560,8 +547,6 @@ class _ChatPageState extends State<ChatPage> {
           ));
           // Update the parent message ID for the next message
           _parentMessageId = msgId;
-          _toolResultMessageAdded =
-              true; // Mark that the message has been added
         }
       });
     } on TimeoutException catch (error) {
@@ -648,8 +633,6 @@ class _ChatPageState extends State<ChatPage> {
       _isLoading = true;
       _isFinalAnswerReceived =
           false; // Reset the final answer flag when retrying
-      _toolResultMessageAdded =
-          false; // Reset the tool result flag when retrying
     });
 
     await _handleSubmitted(
@@ -675,7 +658,7 @@ class _ChatPageState extends State<ChatPage> {
     // Check if the last message is from a user and if it's a tool result that's already been processed
     if (lastMessage.role == MessageRole.user) {
       // Skip processing if this is a tool result message that we've already added
-      if (lastMessage.toolCallId != null && _toolResultMessageAdded) {
+      if (lastMessage.toolCallId != null) {
         Logger.root.info(
             'Last message is a tool result that was already processed, skipping duplicate processing');
         return false;
@@ -769,19 +752,25 @@ class _ChatPageState extends State<ChatPage> {
       _isCancelled = false;
       _isFinalAnswerReceived =
           false; // Reset the final answer flag at the start
-      _toolResultMessageAdded = false; // Reset the tool result message flag
     });
-    final files = data.files.map((file) => platformFileToFile(file)).toList();
-
-    if (addUserMessage && data.text.isNotEmpty) {
-      _addUserMessage(data.text, files);
-    }
 
     try {
+      //first, insert user message
+      if (addUserMessage) {
+        final msgId = Uuid().v4();
+        _messages.add(ChatMessage(
+          messageId: msgId,
+          content: data.text,
+          role: MessageRole.user,
+          parentMessageId: _parentMessageId,
+        ));
+        _parentMessageId = msgId;
+      }
+
       // Continue tool call cycle until final_answer is received
       bool shouldContinue = true;
       int iterationCount = 0;
-      final maxIterations = 10; // Safeguard against infinite loops
+      final maxIterations = 100; // Safeguard against infinite loops
 
       // Main loop - will keep running until we get a final answer or there's no more tool calls
       do {
@@ -790,8 +779,8 @@ class _ChatPageState extends State<ChatPage> {
 
         // Break out if we've exceeded max iterations (safety measure)
         if (iterationCount > maxIterations) {
-          Logger.root
-              .warning('Exceeded maximum tool call iterations. Breaking loop.');
+          Logger.root.warning(
+              'Exceeded maximum tool call iterations ($maxIterations). Breaking loop.');
 
           // Add a final message to indicate the loop was terminated
           final msgId = Uuid().v4();
@@ -952,24 +941,6 @@ class _ChatPageState extends State<ChatPage> {
 
     setState(() {
       _isLoading = false;
-    });
-  }
-
-  void _addUserMessage(String text, List<File> files) {
-    setState(() {
-      _isLoading = true;
-      _isComposing = false;
-      final msgId = Uuid().v4();
-      _messages.add(
-        ChatMessage(
-          messageId: msgId,
-          parentMessageId: _parentMessageId,
-          content: text.replaceAll('\n', '\n\n'),
-          role: MessageRole.user,
-          files: files,
-        ),
-      );
-      _parentMessageId = msgId;
     });
   }
 
@@ -1385,7 +1356,6 @@ class _ChatPageState extends State<ChatPage> {
       _isWating = false;
       _isFinalAnswerReceived =
           false; // Also reset the final answer flag on error
-      _toolResultMessageAdded = false; // Reset the tool result flag on error
     });
 
     if (mounted) {
