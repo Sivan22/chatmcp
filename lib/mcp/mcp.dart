@@ -2,8 +2,10 @@ import 'package:logging/logging.dart';
 import './models/server.dart';
 import './client/mcp_client_interface.dart';
 import './stdio/stdio_client.dart';
-import './sse/sse_client.dart';
+import './sse/sse_client.dart' as sse;
+import './sse/sse_client_web.dart' as sse_web;
 import './streamable/streamable_client.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 Future<McpClient?> initializeMcpServer(
     Map<String, dynamic> mcpServerConfig) async {
@@ -17,7 +19,9 @@ Future<McpClient?> initializeMcpServer(
   if (serverConfig.type.isNotEmpty) {
     switch (serverConfig.type) {
       case 'sse':
-        mcpClient = SSEClient(serverConfig: serverConfig);
+        mcpClient = kIsWeb
+            ? sse_web.SSEClient(serverConfig: serverConfig)
+            : sse.SSEClient(serverConfig: serverConfig);
         break;
       case 'streamable':
         mcpClient = StreamableClient(serverConfig: serverConfig);
@@ -28,7 +32,11 @@ Future<McpClient?> initializeMcpServer(
       default:
         // 降级为基于命令的逻辑
         if (serverConfig.command.startsWith('http')) {
-          mcpClient = SSEClient(serverConfig: serverConfig);
+          mcpClient = kIsWeb
+              ? sse_web.SSEClient(serverConfig: serverConfig)
+              : sse.SSEClient(
+                  serverConfig:
+                      serverConfig); // SSEClient(serverConfig: serverConfig);
         } else {
           mcpClient = StdioClient(serverConfig: serverConfig);
         }
@@ -36,7 +44,11 @@ Future<McpClient?> initializeMcpServer(
   } else {
     // 降级为原来的逻辑
     if (serverConfig.command.startsWith('http')) {
-      mcpClient = SSEClient(serverConfig: serverConfig);
+      mcpClient = kIsWeb
+          ? sse_web.SSEClient(serverConfig: serverConfig)
+          : sse.SSEClient(
+              serverConfig:
+                  serverConfig); // SSEClient(serverConfig: serverConfig);
     } else {
       mcpClient = StdioClient(serverConfig: serverConfig);
     }
@@ -63,7 +75,11 @@ Future<bool> verifyMcpServer(Map<String, dynamic> mcpServerConfig) async {
   if (serverConfig.type != null && serverConfig.type.isNotEmpty) {
     switch (serverConfig.type) {
       case 'sse':
-        mcpClient = SSEClient(serverConfig: serverConfig);
+        mcpClient = kIsWeb
+            ? sse_web.SSEClient(serverConfig: serverConfig)
+            : sse.SSEClient(
+                serverConfig:
+                    serverConfig); // SSEClient(serverConfig: serverConfig);
         break;
       case 'streamable':
         mcpClient = StreamableClient(serverConfig: serverConfig);
@@ -74,7 +90,11 @@ Future<bool> verifyMcpServer(Map<String, dynamic> mcpServerConfig) async {
       default:
         // 降级为基于命令的逻辑
         if (serverConfig.command.startsWith('http')) {
-          mcpClient = SSEClient(serverConfig: serverConfig);
+          mcpClient = kIsWeb
+              ? sse_web.SSEClient(serverConfig: serverConfig)
+              : sse.SSEClient(
+                  serverConfig:
+                      serverConfig); // SSEClient(serverConfig: serverConfig);
         } else {
           mcpClient = StdioClient(serverConfig: serverConfig);
         }
@@ -82,7 +102,11 @@ Future<bool> verifyMcpServer(Map<String, dynamic> mcpServerConfig) async {
   } else {
     // 降级为原来的逻辑
     if (serverConfig.command.startsWith('http')) {
-      mcpClient = SSEClient(serverConfig: serverConfig);
+      mcpClient = kIsWeb
+          ? sse_web.SSEClient(serverConfig: serverConfig)
+          : sse.SSEClient(
+              serverConfig:
+                  serverConfig); // SSEClient(serverConfig: serverConfig);
     } else {
       mcpClient = StdioClient(serverConfig: serverConfig);
     }

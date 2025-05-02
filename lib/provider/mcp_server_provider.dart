@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../mcp/mcp.dart';
 import 'package:logging/logging.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:chatmcp/utils/platform.dart';
 import '../mcp/client/mcp_client_interface.dart';
@@ -16,6 +17,7 @@ class McpServerProvider extends ChangeNotifier {
   }
 
   static const _configFileName = 'mcp_server.json';
+  static const _mcpServersKey = 'mcp_servers_config';
 
   Map<String, McpClient> _servers = {};
 
@@ -23,7 +25,7 @@ class McpServerProvider extends ChangeNotifier {
 
   // Check if current platform supports MCP Server
   bool get isSupported {
-    return !Platform.isIOS && !Platform.isAndroid;
+    return kIsWeb || (!Platform.isIOS && !Platform.isAndroid);
   }
 
   // Get configuration file path
@@ -35,20 +37,35 @@ class McpServerProvider extends ChangeNotifier {
     return '${directory.path}/$_configFileName';
   }
 
-  // Check and create initial configuration file
-  Future<void> _initConfigFile() async {
-    if (kIsWeb) {
-      return;
-    }
-    final file = File(await _configFilePath);
+  // Initialize SharedPreferences with default configuration if needed
+  Future<void> _initSharedPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
 
-    if (!await file.exists()) {
+    // Check if configuration exists in SharedPreferences
+    if (!prefs.containsKey(_mcpServersKey)) {
       // Load default configuration from assets
       final defaultConfig =
           await rootBundle.loadString('assets/mcp_server.json');
-      // Write default configuration to file
-      await file.writeAsString(defaultConfig);
-      Logger.root.info('Default configuration file initialized from assets');
+
+      // Save to SharedPreferences
+      await prefs.setString(_mcpServersKey, defaultConfig);
+      Logger.root
+          .info('Default configuration initialized in SharedPreferences');
+    }
+
+    // Migration: If we're not on web and the file exists, migrate to SharedPreferences
+    if (!kIsWeb) {
+      try {
+        final file = File(await _configFilePath);
+        if (await file.exists()) {
+          final String contents = await file.readAsString();
+          await prefs.setString(_mcpServersKey, contents);
+          Logger.root
+              .info('Migrated configuration from file to SharedPreferences');
+        }
+      } catch (e) {
+        Logger.root.warning('File migration skipped: $e');
+      }
     }
   }
 
@@ -59,44 +76,61 @@ class McpServerProvider extends ChangeNotifier {
     return serverConfig.length;
   }
 
-  // Read server configuration
+  // Read server configuration from SharedPreferences
   Future<Map<String, dynamic>> loadServers() async {
-    if (kIsWeb) {
-      Logger.root.info('loadServers (on web): return mcpServers: {}');
-      return {'mcpServers': <String, dynamic>{}};
-    }
     try {
-      await _initConfigFile();
-      final file = File(await _configFilePath);
-      final String contents = await file.readAsString();
+      await _initSharedPreferences();
+      final prefs = await SharedPreferences.getInstance();
+
+      // Get configuration from SharedPreferences
+      final String? contents = prefs.getString(_mcpServersKey);
+
+      if (contents == null) {
+        Logger.root.warning('No configuration found in SharedPreferences');
+        return {'mcpServers': <String, dynamic>{}};
+      }
+
       final Map<String, dynamic> data = json.decode(contents);
       if (data['mcpServers'] == null) {
         data['mcpServers'] = <String, dynamic>{};
       }
-      // 遍历data['mcpServers']，直接设置installed为true，
+
+      // Set all servers as installed
       for (var server in data['mcpServers'].entries) {
         server.value['installed'] = true;
       }
+
       return data;
     } catch (e, stackTrace) {
-      Logger.root.severe(
-          'Failed to read configuration file: $e, stackTrace: $stackTrace');
+      Logger.root
+          .severe('Failed to read configuration: $e, stackTrace: $stackTrace');
       return {'mcpServers': <String, dynamic>{}};
     }
   }
 
-  // Save server configuration
+  // Save server configuration to SharedPreferences
   Future<void> saveServers(Map<String, dynamic> servers) async {
     try {
-      final file = File(await _configFilePath);
+      final prefs = await SharedPreferences.getInstance();
       final prettyContents =
           const JsonEncoder.withIndent('  ').convert(servers);
-      await file.writeAsString(prettyContents);
+      await prefs.setString(_mcpServersKey, prettyContents);
+
+      // Also save to file for backward compatibility if not on web
+      if (!kIsWeb) {
+        try {
+          final file = File(await _configFilePath);
+          await file.writeAsString(prettyContents);
+        } catch (e) {
+          Logger.root.warning('Failed to write to backup file: $e');
+        }
+      }
+
       // Reinitialize clients after saving
       await _reinitializeClients();
     } catch (e, stackTrace) {
-      Logger.root.severe(
-          'Failed to save configuration file: $e, stackTrace: $stackTrace');
+      Logger.root
+          .severe('Failed to save configuration: $e, stackTrace: $stackTrace');
     }
   }
 
@@ -154,18 +188,17 @@ class McpServerProvider extends ChangeNotifier {
 
   Future<void> init() async {
     try {
-      // Ensure configuration file exists
-      await _initConfigFile();
+      // Initialize SharedPreferences
+      await _initSharedPreferences();
 
+      // Get configuration path for logging purposes
       final configFilePath = await _configFilePath;
-      Logger.root.info('mcp_server path: $configFilePath');
+      Logger.root.info('mcp_server path (legacy): $configFilePath');
 
-      // Add configuration file content log
-      if (!kIsWeb) {
-        final configFile = File(configFilePath);
-        final configContent = await configFile.readAsString();
-        Logger.root.info('mcp_server config: $configContent');
-      }
+      // Log configuration content
+      final prefs = await SharedPreferences.getInstance();
+      final configContent = prefs.getString(_mcpServersKey);
+      Logger.root.info('mcp_server config: $configContent');
 
       final ignoreServers = <String>[];
       for (var entry in clients.entries) {
@@ -185,11 +218,15 @@ class McpServerProvider extends ChangeNotifier {
       Logger.root.severe(
           'Failed to initialize MCP servers: $e, stackTrace: $stackTrace');
       // Print more detailed error information
-      if (e is TypeError && !kIsWeb) {
-        final configFile = File(await _configFilePath);
-        final content = await configFile.readAsString();
-        Logger.root.severe(
-            'Configuration file parsing error, current content: $content');
+      if (e is TypeError) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final content = prefs.getString(_mcpServersKey);
+          Logger.root
+              .severe('Configuration parsing error, current content: $content');
+        } catch (e2) {
+          Logger.root.severe('Failed to retrieve configuration: $e2');
+        }
       }
     }
   }
@@ -238,13 +275,20 @@ class McpServerProvider extends ChangeNotifier {
 
   Future<Map<String, McpClient>> initializeAllMcpServers(
       String configPath, List<String> ignoreServers) async {
-    final file = File(configPath);
-    final contents = await file.readAsString();
+    // Read configuration from SharedPreferences instead of file
+    final prefs = await SharedPreferences.getInstance();
+    final contents = prefs.getString(_mcpServersKey);
+
+    if (contents == null) {
+      Logger.root.warning(
+          'No configuration found in SharedPreferences for initializeAllMcpServers');
+      return {};
+    }
 
     final Map<String, dynamic> config =
         json.decode(contents) as Map<String, dynamic>? ?? {};
 
-    final mcpServers = config['mcpServers'] as Map<String, dynamic>;
+    final mcpServers = config['mcpServers'] as Map<String, dynamic>? ?? {};
 
     final Map<String, McpClient> clients = {};
 
